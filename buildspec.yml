@@ -9,11 +9,7 @@ phases:
   build:
     commands:
       - npm run build
-  post_build:
-    commands:
-      - aws s3 sync dist/ s3://$WEBSITE_BUCKET --delete
-
 artifacts:
+  base-directory: dist
   files:
     - '**/*'
-  base-directory: dist
