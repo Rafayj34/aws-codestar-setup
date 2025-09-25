@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Vite/React CI/CD: GitHub (CodeStar Connection) 
+  Vite/React CI/CD: GitHub (CodeStar Connection) + EventBridge trigger
 
 Parameters:
   CodeStarConnectionArn:
@@ -8,7 +8,7 @@ Parameters:
     Description: ARN of a pre-created AWS::CodeStarConnections::Connection (GitHub). Create in console or via CLI.
   GitHubRepo:
     Type: String
-    Description: GitHub repo in format "owner/repo"
+    Description: GitHub repo in format "owner/repo" (used for display; CodeStar connection handles auth)
   GitHubBranch:
     Type: String
     Default: main
@@ -237,26 +237,41 @@ Resources:
                 ProjectName: !Ref BuildProject
               RunOrder: 1
 
+  EventBridgeInvokePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowPipelineStart
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}"
+
   PipelineTriggerRule:
     Type: AWS::Events::Rule
     Properties:
       Name: !Sub "${AWS::StackName}-trigger"
+      Description: "Trigger pipeline on GitHub push via CodeStar Connection"
       EventPattern:
         source:
-          - aws.codestar
+          - "aws.codestar-connections"
         detail-type:
-          - "CodeStar Source Connection Repository State Change"
+          - "CodeStar Connections Source Repository State Change"
         resources:
           - !Ref CodeStarConnectionArn
-        detail:
-          repositoryName:
-            - !Select [1, !Split ["/", !Ref GitHubRepo]]
-          branchName:
-            - !Ref GitHubBranch
       Targets:
-        - Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
-          RoleArn: !GetAtt CodePipelineRole.Arn
-          Id: CodePipelineTarget
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}"
+          Id: "CodePipelineTarget"
+          RoleArn: !GetAtt EventBridgeInvokePipelineRole.Arn
 
 Outputs:
   CloudFrontURL:
