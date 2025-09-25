@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Vite/React CI/CD: GitHub (CodeStar Connection) 
+  Vite/React CI/CD: GitHub (CodeStar Connection) + EventBridge trigger
 
 Parameters:
   CodeStarConnectionArn:
@@ -22,7 +22,6 @@ Resources:
       VersioningConfiguration:
         Status: Suspended
 
-  # Bucket policy to allow CloudFront (by SourceArn) to GetObject
   WebsiteBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -74,11 +73,9 @@ Resources:
         ViewerCertificate:
           CloudFrontDefaultCertificate: true
 
-  # Pipeline artifact bucket (separate from website bucket)
   PipelineArtifactBucket:
     Type: AWS::S3::Bucket
 
-  # Roles
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -156,7 +153,6 @@ Resources:
                   - cloudfront:CreateInvalidation
                 Resource: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/*"
 
-  # CodeBuild project that builds and syncs dist/ to S3 and invalidates CloudFront
   BuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
@@ -202,7 +198,6 @@ Resources:
       Cache:
         Type: NO_CACHE
 
-  # Pipeline itself using CodeStar connection as source
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -241,6 +236,42 @@ Resources:
               Configuration:
                 ProjectName: !Ref BuildProject
               RunOrder: 1
+
+  EventBridgeInvokePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowPipelineStart
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}"
+
+  PipelineTriggerRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-trigger"
+      Description: "Trigger pipeline on GitHub push via CodeStar Connection"
+      EventPattern:
+        source:
+          - "aws.codestar-connections"
+        detail-type:
+          - "CodeStar Connections Source Repository State Change"
+        resources:
+          - !Ref CodeStarConnectionArn
+      Targets:
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}"
+          Id: "CodePipelineTarget"
+          RoleArn: !GetAtt EventBridgeInvokePipelineRole.Arn
 
 Outputs:
   CloudFrontURL:
